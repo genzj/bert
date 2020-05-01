@@ -25,6 +25,8 @@ import modeling
 import optimization
 import tokenization
 import tensorflow as tf
+from functools import lru_cache
+from sklearn.model_selection import train_test_split
 
 flags = tf.flags
 
@@ -372,6 +374,65 @@ class ColaProcessor(DataProcessor):
       examples.append(
           InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
     return examples
+
+
+class KaggleSpookyProcessor(DataProcessor):
+  """Processor for the Kaggle Spooky Author Identification data set."""
+  def __init__(self, split_random=42, train_ratio=0.9):
+    self.split_random = split_random
+    self.train_ratio = train_ratio
+
+  @classmethod
+  def _read_csv(cls, input_file):
+    """Reads a tab separated value file."""
+    with tf.gfile.Open(input_file, "r") as f:
+      reader = csv.reader(f)
+      # ignore first row the header
+      next(reader)
+      return list(reader)
+
+  @lru_cache(maxsize=5)
+  def get_train_and_dev(self, data_dir):
+    dataset = self._read_csv(os.path.join(data_dir, "train.csv"))
+    train, dev = train_test_split(
+      dataset, stratify=[l[2] for l in dataset],
+      random_state=self.split_random, test_size=1-self.train_ratio,
+      shuffle=True
+    )
+    return train, dev
+
+  def get_train_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(self.get_train_and_dev(data_dir)[0], "train")
+
+  def get_dev_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(self.get_train_and_dev(data_dir)[1], "dev")
+
+  def get_test_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(
+        self._read_csv(os.path.join(data_dir, "test.csv")), "test")
+
+  def get_labels(self):
+    """See base class."""
+    return ["eap", "hpl", "mws"]
+
+  def _create_examples(self, lines, set_type):
+    """Creates examples for the training and dev sets."""
+    examples = []
+    for line in lines:
+      guid = "%s-%s" % (set_type, line[0])
+      text_a = tokenization.convert_to_unicode(line[1])
+      if set_type == "test":
+        guid = line[0]
+        label = 'eap'
+      else:
+        label = tokenization.convert_to_unicode(line[2].lower())
+      examples.append(
+          InputExample(guid=guid, text_a=text_a, label=label))
+    return examples
+
 
 
 def convert_single_example(ex_index, example, label_list, max_seq_length,
@@ -788,6 +849,7 @@ def main(_):
       "mnli": MnliProcessor,
       "mrpc": MrpcProcessor,
       "xnli": XnliProcessor,
+      "spooky": KaggleSpookyProcessor,
   }
 
   tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case,
